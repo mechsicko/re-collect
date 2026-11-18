@@ -1,0 +1,14 @@
+{
+  "name": "re-collect",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "viem": "^2.58.0"
+  }
+}
