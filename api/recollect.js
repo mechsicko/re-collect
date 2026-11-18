@@ -52,7 +52,7 @@ async function checkSession(token) {
   if (!addr) throw fail('Sign in again.', 401);
   return addr;
 }
-async function who(req, b = {}) {
+export async function who(req, b = {}) {
   const s = req.headers.get('x-session') || b.session;
   if (s) return { id: await checkSession(s), wallet: true };
   return { id: await checkDevice(req.headers.get('x-player') || b.id, req.headers.get('x-key') || b.key), wallet: false };

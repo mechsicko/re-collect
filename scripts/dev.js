@@ -19,28 +19,37 @@ globalThis.fetch = async (url, opts) => {
   if (url !== 'http://memory') return realFetch(url, opts);
   const [c, ...a] = JSON.parse(opts.body); let result = null;
   const H = k => (mem.h[k] ||= {});
+  const live = k => { const e = mem.k[k]; if (e && typeof e === 'object' && e.exp <= Date.now()) { delete mem.k[k]; return undefined; } return e; };
+  const val = e => e && typeof e === 'object' ? e.v : e;
   switch (c) {
     case 'HSETNX': result = a[1] in H(a[0]) ? 0 : (H(a[0])[a[1]] = a[2], 1); break;
     case 'HGET': result = H(a[0])[a[1]] ?? null; break;
     case 'HSET': H(a[0])[a[1]] = a[2]; result = 1; break;
     case 'HGETALL': result = Object.entries(H(a[0])).flat(); break;
-    case 'GET': result = mem.k[a[0]] ?? null; break;
-    case 'GETDEL': result = mem.k[a[0]] ?? null; delete mem.k[a[0]]; break;
-    case 'DEL': result = a[0] in mem.k ? 1 : 0; delete mem.k[a[0]]; break;
-    case 'HDEL': result = a[1] in H(a[0]) ? 1 : 0; delete H(a[0])[a[1]]; break;
-    case 'SET': if (a.includes('NX') && mem.k[a[0]] && mem.k[a[0]].exp > Date.now()) result = null; else { mem.k[a[0]] = a.includes('EX') ? { v: a[1], exp: Date.now() + 1000 * a[a.indexOf('EX') + 1] } : a[1]; result = 'OK'; } if (mem.k[a[0]] && mem.k[a[0]].v === undefined) {} break;
+    case 'HDEL': result = 0; for (const f of a.slice(1)) if (f in H(a[0])) { delete H(a[0])[f]; result++; } break;
+    case 'GET': result = val(live(a[0])) ?? null; break;
+    case 'GETDEL': result = val(live(a[0])) ?? null; delete mem.k[a[0]]; break;
+    case 'DEL': result = (live(a[0]) !== undefined || a[0] in mem.h) ? 1 : 0; delete mem.k[a[0]]; delete mem.h[a[0]]; break;
+    case 'EXPIRE': result = 1; break;
+    case 'SET': {
+      const has = live(a[0]) !== undefined;
+      if ((a.includes('NX') && has) || (a.includes('XX') && !has)) { result = null; break; }
+      const ex = a.indexOf('EX'), px = a.indexOf('PX');
+      mem.k[a[0]] = ex > 0 ? { v: a[1], exp: Date.now() + 1000 * a[ex + 1] } : px > 0 ? { v: a[1], exp: Date.now() + +a[px + 1] } : a[1];
+      result = 'OK'; break;
+    }
   }
-  if ((c === 'GET' || c === 'GETDEL') && result && typeof result === 'object') result = result.v;
   return new Response(JSON.stringify({ result }), { headers: { 'content-type': 'application/json' } });
 };
 const api = await import('../api/recollect.js');
+const versus = await import('../api/versus.js');
 const PREFIX = process.env.PREFIX || '';          // e.g. /recollect to act like the page lives in a folder
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   let path = url.pathname.startsWith(PREFIX) ? url.pathname.slice(PREFIX.length) || '/' : url.pathname;
-  if (path === '/api/recollect') {
+  if (path === '/api/recollect' || path === '/api/versus') {
     const body = req.method === 'POST' ? await new Promise(r => { let d = ''; req.on('data', c => d += c); req.on('end', () => r(d)); }) : undefined;
-    const r = await api[req.method](new Request(url, { method: req.method, headers: req.headers, body }));
+    const r = await (path === '/api/versus' ? versus : api)[req.method](new Request(url, { method: req.method, headers: req.headers, body }));
     res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(await r.text()); return;
   }
   if (path === '/' || path === '/index.html') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(await readFile(new URL('../public/index.html', import.meta.url))); return; }
